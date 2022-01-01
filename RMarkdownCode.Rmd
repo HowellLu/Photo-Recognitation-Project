@@ -1,0 +1,354 @@
+---
+title: "Utilizing Data Analysis Methods for Photographic Classification"
+author: "Howell Lu"
+date: "12/31/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+The main point of this project was a test for me to see if I could classify photos from the "Columbia Photographic Images
+and Photorealistic Computer Graphics Dataset" and to see which Classification method would generate the most accurate results. 
+
+This is just to load all the images into RStudio and to extract the true values for each image and it's classification. 
+
+```{r}
+library(jpeg)
+library(magick)
+pm <- read.csv("C:\\Users\\howel\\OneDrive\\Desktop\\PhotoRecognitation Project\\photoMetaData.csv")
+
+n <- nrow(pm)
+trainFlag <- (runif(n) > 0.5)
+y <- as.numeric(pm$category == "outdoor-day")
+
+X <- matrix(NA, ncol=3, nrow=n)
+for (j in 1:n) {
+  img <- readJPEG(paste0("C:\\Users\\howel\\OneDrive\\Desktop\\PhotoRecognitation Project\\columbiaImages\\",pm$name[j]))
+  X[j,] <- apply(img,3,median)
+  #print(sprintf("%03d / %03d", j, n))
+}
+
+```
+
+Code to generate ROC curve:
+
+```{r}
+storeme<-0
+for (i in 1:50) {
+
+trainFlag <- (runif(n) > 0.5)
+y <- as.numeric(pm$category == "outdoor-day")
+
+# build a glm model on these median values
+out <- glm(y ~ X, family=binomial, subset=trainFlag)
+out$iter
+summary(out)
+
+# How well did we do? We only get the regression from the first bit
+pred <- 1 / (1 + exp(-1 * cbind(1,X) %*% coef(out)))
+
++(as.numeric(pred > 0.5) == y)
++mean((as.numeric(pred > 0.5) == y))
+mean((as.numeric(pred > 0.5) == y)[trainFlag])
+mean((as.numeric(pred > 0.5) == y)[!trainFlag])
+
+## ROC curve 
+roc <- function(y, pred) {
+  alpha <- quantile(pred, seq(0,1,by=0.01))
+  N <- length(alpha)
+
+  sens <- rep(NA,N)
+  spec <- rep(NA,N)
+  for (i in 1:N) {
+    predClass <- as.numeric(pred >= alpha[i])
+    sens[i] <- sum(predClass == 1 & y == 1) / sum(y == 1)
+    spec[i] <- sum(predClass == 0 & y == 0) / sum(y == 0)
+  }
+  return(list(fpr=1- spec, tpr=sens))
+}
+
+r <- roc(y[!trainFlag], pred[!trainFlag])
+plot(r$fpr, r$tpr, xlab="false positive rate", ylab="true positive rate", type="l")
+abline(0,1,lty="dashed")
+
+# auc
+auc <- function(r) {
+  sum((r$fpr) * diff(c(0,r$tpr)))
+}
+glmAuc <- auc(r)
+glmAuc
+storeme<-storeme+glmAuc
+
+}
+
+print(storeme)
+```
+
+I used a linear regression based on the RGB of the images to attempt to train a model. That model was run 50 times and resulted in an ROC of 0.81. However, I believe that we can do much better with an ensemble method. So I then proceeded to generate the principal components. 
+
+
+
+
+```{r}
+FatMatrix <-NULL
+for (j in 1:n) {
+    img <- readJPEG(paste0("C:\\Users\\howel\\OneDrive\\Desktop\\PhotoRecognitation Project\\columbiaImages\\",pm$name[j]))
+    current_image <- image_read(img) 
+    current_image_data <- as.numeric(current_image[[1]][,,])
+    FatMatrix <- rbind(FatMatrix,current_image_data)
+    print(j)
+}
+
+```
+
+
+
+This may seem very unorthodox because the images are in rows rather than columns. However, I don't think it's very very relevant as we are simply amalgamating all the information into principal components and attempting to sort through that mess with Data Science techniques. Furthermore, PCA with rectangular matrices is a lot easier and less computationally intensive than PCA with skyscraper matrices. 
+
+
+
+```{r}
+compressedpca<-prcomp(FatMatrix,scale=TRUE)
+```
+
+```{r}
+
+PCASTORE<-compressedpca$x[,1:800]
+x<-PCASTORE[,1:200]
+y <- as.numeric(pm$category == "outdoor-day")
+NeededPCA<-cbind(y,x)
+
+
+plot(NeededPCA[,2:3])
+typea<-grep(NeededPCA[,1], pattern = 1)
+points(NeededPCA[typea,2:3],col="orange")
+
+
+OneThree<-NeededPCA[,1:4]
+OneThree<-OneThree[,-3]
+plot(OneThree[,2:3])
+typea<-grep(NeededPCA[,1], pattern = 1)
+points(OneThree[typea,2:3],col="orange")
+
+plot(NeededPCA[,3:4])
+typea<-grep(NeededPCA[,1], pattern = 1)
+points(NeededPCA[typea,3:4],col="orange")
+```
+
+```{r}
+library(e1071)
+
+```
+Plotting Eigenvalues and Variance Explained
+
+```{r}
+plot(cumsum(compressedpca$sdev^2 / sum(compressedpca$sdev^2)), type="b", xlab="PCAs Used", ylab="Amount of Variation Explained")
+cumsum(compressedpca$sdev^2 / sum(compressedpca$sdev^2))
+```
+
+
+
+Using SVM for predictions:
+
+```{r}
+
+## ROC curve (see lecture 12)
+start_time <- Sys.time()
+storeme<-0
+for (i in 1:50) {
+trainingID<-sample(1:800,400)
+testID<-sample(1:800)[-trainingID]
+svmmodel<-svm(x[trainingID,],y[trainingID])
+pred<-predict(svmmodel,x)
+roc <- function(y, pred) {
+  alpha <- quantile(pred, seq(0,1,by=0.01))
+  N <- length(alpha)
+
+  sens <- rep(NA,N)
+  spec <- rep(NA,N)
+  for (i in 1:N) {
+    predClass <- as.numeric(pred >= alpha[i])
+    sens[i] <- sum(predClass == 1 & y == 1) / sum(y == 1)
+    spec[i] <- sum(predClass == 0 & y == 0) / sum(y == 0)
+  }
+  return(list(fpr=1- spec, tpr=sens))
+}
+
+r <- roc(y[testID], pred[testID])
+plot(r$fpr, r$tpr, xlab="false positive rate", ylab="true positive rate", type="l")
+abline(0,1,lty="dashed")
+
+# auc
+auc <- function(r) {
+  sum((r$fpr) * diff(c(0,r$tpr)))
+}
+glmAuc <- auc(r)
+glmAuc
+storeme<-storeme+glmAuc
+}
+print(storeme/50)
+end_time <- Sys.time()
+end_time - start_time
+
+
+```
+
+AUC using Random Forest
+
+```{r}
+library(randomForest)
+start_time <- Sys.time()
+storeme<-0
+ttp<-0
+ttn<-0
+tfp<-0
+tfn<-0
+for (i in 1:50) {
+    trainingID<-sample(1:800,400)
+    testID<-sample(1:800)[-trainingID]
+    rf_classifier = randomForest(y ~ ., data=NeededPCA[trainingID,], ntree=1000, mtry=14, importance=TRUE)
+    treepred<-predict(rf_classifier,x)
+    tp<-sum((round(treepred)==1)*(y==1))
+    tn<-sum((round(treepred)==0)*(y==0))
+    fp<-sum((round(treepred)==1)*(y==0))
+    fn<-sum((round(treepred)==0)*(y==1))
+    
+    roc <- function(y, treepred) {
+        alpha <- quantile(treepred, seq(0,1,by=0.01))
+        N <- length(alpha)
+        
+        sens <- rep(NA,N)
+        spec <- rep(NA,N)
+        for (i in 1:N) {
+            predClass <- as.numeric(treepred >= alpha[i])
+            sens[i] <- sum(predClass == 1 & y == 1) / sum(y == 1)
+            spec[i] <- sum(predClass == 0 & y == 0) / sum(y == 0)
+        }
+        return(list(fpr=1- spec, tpr=sens))
+    }
+    
+    r <- roc(y[testID], treepred[testID])
+    plot(r$fpr, r$tpr, xlab="false positive rate", ylab="true positive rate", type="l")
+    abline(0,1,lty="dashed")
+    
+    # auc
+    auc <- function(r) {
+        sum((r$fpr) * diff(c(0,r$tpr)))
+    }
+    glmAuc <- auc(r)
+    glmAuc
+    storeme<-storeme+glmAuc
+    ttp<-ttp+tp
+    ttn<-ttn+tn
+    tfp<-tfp+fp
+    tfn<-tfn+fn
+}
+print(storeme/50)
+end_time <- Sys.time()
+end_time - start_time
+misrate<-(tfp+tfn)/40000
+sensitivity<-ttp/(ttp+tfn)
+specificity<-ttn/(ttn+tfp)
+
+```
+
+Code for Neural Network
+
+```{r}
+start_time <- Sys.time()
+storeme<-0
+for (i in 1:50) {
+    trainingID<-sample(1:800,400)
+    testID<-sample(1:800)[-trainingID]
+    nn <- neuralnet(y ~ ., data=NeededPCA[trainingID,], hidden=c(60,25), linear.output=FALSE, threshold=0.01)
+    nn.results <- compute(nn, x)
+    results <- data.frame(actual = y, prediction = nn.results$net.result)
+    ynn<-nn.results$net.result
+    mean((as.numeric(ynn > 0.5) == y)[testID])
+
+    
+    roc <- function(y, ynn) {
+        alpha <- quantile(ynn, seq(0,1,by=0.01))
+        N <- length(alpha)
+        
+        sens <- rep(NA,N)
+        spec <- rep(NA,N)
+        for (i in 1:N) {
+            predClass <- as.numeric(ynn >= alpha[i])
+            sens[i] <- sum(predClass == 1 & y == 1) / sum(y == 1)
+            spec[i] <- sum(predClass == 0 & y == 0) / sum(y == 0)
+        }
+        return(list(fpr=1- spec, tpr=sens))
+    }
+    
+    r <- roc(y[testID], ynn[testID])
+    plot(r$fpr, r$tpr, xlab="false positive rate", ylab="true positive rate", type="l")
+    abline(0,1,lty="dashed")
+    
+    # auc
+    auc <- function(r) {
+        sum((r$fpr) * diff(c(0,r$tpr)))
+    }
+    glmAuc <- auc(r)
+    glmAuc
+    storeme<-storeme+glmAuc
+    
+}
+print(storeme/50)
+end_time <- Sys.time()
+end_time - start_time
+```
+Logistic Regression
+
+```{r}
+start_time <- Sys.time()
+framex <- as.data.frame(x[,1:200])
+framey<-as.data.frame(y)
+frame<-cbind(framex,framey)
+start_time <- Sys.time()
+storeme<-0
+for (i in 1:50) {
+    trainingID<-sample(1:800,400)
+    testID<-sample(1:800)[-trainingID]
+    RegModel<-glm(y~.,data = frame,family=binomial, subset = trainingID,maxit=200)
+    framex<-as.matrix(framex)
+    pred <- 1 / (1 + exp(-1 * cbind(1,framex) %*% coef(RegModel)))
+    mean((as.numeric(pred > 0.5) == y)[testID])
+    
+    
+    roc <- function(y, pred) {
+        alpha <- quantile(pred, seq(0,1,by=0.01))
+        N <- length(alpha)
+        
+        sens <- rep(NA,N)
+        spec <- rep(NA,N)
+        for (i in 1:N) {
+            predClass <- as.numeric(pred >= alpha[i])
+            sens[i] <- sum(predClass == 1 & y == 1) / sum(y == 1)
+            spec[i] <- sum(predClass == 0 & y == 0) / sum(y == 0)
+        }
+        return(list(fpr=1- spec, tpr=sens))
+    }
+    
+    r <- roc(y[testID], pred[testID])
+    plot(r$fpr, r$tpr, xlab="false positive rate", ylab="true positive rate", type="l")
+    abline(0,1,lty="dashed")
+    
+    # auc
+    auc <- function(r) {
+        sum((r$fpr) * diff(c(0,r$tpr)))
+    }
+    glmAuc <- auc(r)
+    glmAuc
+    storeme<-storeme+glmAuc
+    
+}
+print(storeme/50)
+end_time <- Sys.time()
+end_time - start_time
+```
+
+Here we get an ROC of 0.815
