@@ -18,7 +18,7 @@ This is just to load all the images into RStudio and to extract the true values 
 ```{r}
 library(jpeg)
 library(magick)
-pm <- read.csv("C:\\Users\\howel\\OneDrive\\Desktop\\PhotoRecognitation Project\\photoMetaData.csv")
+pm <- read.csv("C:\\Users\\howel\\OneDrive\\Desktop\\PhotoRecognitionProject\\photoMetaData.csv")
 
 n <- nrow(pm)
 trainFlag <- (runif(n) > 0.5)
@@ -26,7 +26,7 @@ y <- as.numeric(pm$category == "outdoor-day")
 
 X <- matrix(NA, ncol=3, nrow=n)
 for (j in 1:n) {
-  img <- readJPEG(paste0("C:\\Users\\howel\\OneDrive\\Desktop\\PhotoRecognitation Project\\columbiaImages\\",pm$name[j]))
+  img <- readJPEG(paste0("C:\\Users\\howel\\OneDrive\\Desktop\\PhotoRecognitionProject\\columbiaImages\\",pm$name[j]))
   X[j,] <- apply(img,3,median)
   #print(sprintf("%03d / %03d", j, n))
 }
@@ -95,7 +95,7 @@ I used a linear regression based on the RGB of the images to attempt to train a 
 ```{r}
 FatMatrix <-NULL
 for (j in 1:n) {
-    img <- readJPEG(paste0("C:\\Users\\howel\\OneDrive\\Desktop\\PhotoRecognitation Project\\columbiaImages\\",pm$name[j]))
+    img <- readJPEG(paste0("C:\\Users\\howel\\OneDrive\\Desktop\\PhotoRecognitionProject\\columbiaImages\\",pm$name[j]))
     current_image <- image_read(img) 
     current_image_data <- as.numeric(current_image[[1]][,,])
     FatMatrix <- rbind(FatMatrix,current_image_data)
